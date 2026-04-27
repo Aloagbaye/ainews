@@ -26,17 +26,84 @@ Search for the most important AI news from the past 7 days covering: {topics}.
 Write a newsletter-style digest with:
 - A punchy one-sentence intro
 - 4-5 top stories, each with a short bold headline and 2-3 sentence summary
+- For EACH story, include at least one verification link (prefer the original source / official announcement)
 - A closing "what to watch" sentence
 
 Return ONLY valid JSON (no markdown fences) in this exact shape:
 {{
   "intro": "...",
   "stories": [
-    {{"headline": "...", "summary": "..."}},
+    {{"headline": "...", "summary": "...", "links": ["https://..."]}},
     ...
   ],
   "watch": "..."
 }}"""
+
+def _is_http_url(value: str) -> bool:
+    if not isinstance(value, str):
+        return False
+    return value.startswith("http://") or value.startswith("https://")
+
+
+def _fallback_verify_link(headline: str) -> str:
+    # Google News search is a decent "verification" fallback when no canonical URL is returned.
+    # It keeps the email actionable and ensures at least one link per story.
+    from urllib.parse import quote_plus
+
+    q = quote_plus(headline or "AI news")
+    return f"https://news.google.com/search?q={q}"
+
+
+def normalize_digest(digest: dict) -> dict:
+    """
+    Ensure a stable digest shape and at least one verification link per story.
+    This guards against occasional model schema drift.
+    """
+    if not isinstance(digest, dict):
+        raise ValueError("Digest must be a dict.")
+
+    stories = digest.get("stories") or []
+    if not isinstance(stories, list):
+        stories = []
+
+    normalized_stories = []
+    for story in stories:
+        if not isinstance(story, dict):
+            continue
+        headline = (story.get("headline") or "").strip()
+        summary = (story.get("summary") or "").strip()
+
+        links_raw = story.get("links", [])
+        if isinstance(links_raw, str):
+            links_raw = [links_raw]
+        if not isinstance(links_raw, list):
+            links_raw = []
+
+        links = []
+        for link in links_raw:
+            if isinstance(link, dict):
+                # Allow minor schema drift like {"url": "..."}.
+                link = link.get("url")
+            if _is_http_url(link):
+                links.append(link)
+
+        if not links:
+            links = [_fallback_verify_link(headline)]
+
+        normalized_stories.append(
+            {
+                "headline": headline,
+                "summary": summary,
+                "links": links,
+            }
+        )
+
+    digest["stories"] = normalized_stories
+    if "intro" in digest and isinstance(digest["intro"], str):
+        digest["intro"] = digest["intro"].strip()
+    if "watch" in digest and isinstance(digest["watch"], str):
+        digest["watch"] = digest["watch"].strip()
+    return digest
 
 
 def fetch_and_summarize() -> dict:
@@ -89,7 +156,8 @@ def fetch_and_summarize() -> dict:
             candidate = m.group(0).strip()
 
     try:
-        return json.loads(candidate)
+        digest = json.loads(candidate)
+        return normalize_digest(digest)
     except json.JSONDecodeError as e:
         snippet = candidate[:500].replace("\n", "\\n")
         raise ValueError(
@@ -125,6 +193,9 @@ def build_plain_text(digest: dict) -> str:
     for i, story in enumerate(digest["stories"], 1):
         lines.append(f"{i}. {story['headline']}")
         lines.append(story["summary"])
+        links = story.get("links") or []
+        if isinstance(links, list) and links:
+            lines.append(f"Verify: {links[0]}")
         lines.append("")
     lines.append(f"What to watch: {digest['watch']}")
     return "\n".join(lines)

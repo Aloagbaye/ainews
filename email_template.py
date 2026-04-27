@@ -7,6 +7,31 @@ Clean, email-client-safe inline CSS.
 def build_html_email(digest: dict, date_str: str) -> str:
     stories_html = ""
     for story in digest["stories"]:
+        links_html = ""
+        links = story.get("links") or []
+        if isinstance(links, str):
+            links = [links]
+        if isinstance(links, list) and links:
+            link_items = ""
+            for url in links:
+                if not isinstance(url, str) or not (url.startswith("http://") or url.startswith("https://")):
+                    continue
+                link_items += (
+                    f'<a href="{url}" '
+                    'style="color:#2563eb;text-decoration:underline;" target="_blank" rel="noopener noreferrer">'
+                    "Verify</a>"
+                )
+                link_items += '<span style="color:#cbd5e1;">&nbsp;·&nbsp;</span>'
+
+            if link_items.endswith('<span style="color:#cbd5e1;">&nbsp;·&nbsp;</span>'):
+                link_items = link_items[: -len('<span style="color:#cbd5e1;">&nbsp;·&nbsp;</span>')]
+
+            if link_items:
+                links_html = f"""
+            <p style="margin:10px 0 0;font-size:13px;line-height:1.6;color:#64748b;">
+              {link_items}
+            </p>"""
+
         stories_html += f"""
         <tr>
           <td style="padding:0 0 24px 0;">
@@ -17,6 +42,7 @@ def build_html_email(digest: dict, date_str: str) -> str:
             <p style="margin:0;font-size:15px;line-height:1.65;color:#374151;">
               {story['summary']}
             </p>
+            {links_html}
           </td>
         </tr>"""
 
