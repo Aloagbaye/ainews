@@ -140,6 +140,10 @@ def fetch_and_summarize() -> dict:
     if not raw:
         raise ValueError("Claude returned an empty final answer (expected JSON).")
 
+    # Strip <cite ...>...</cite> tags Claude may inject inside JSON string values.
+    raw = re.sub(r"<cite[^>]*>", "", raw)
+    raw = raw.replace("</cite>", "")
+
     # Strip accidental markdown fences
     if raw.startswith("```"):
         parts = raw.split("```")
