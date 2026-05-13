@@ -1,0 +1,36 @@
+---
+layout: home
+title: "Weekly AI Digest"
+---
+
+<p style="color:#6b7280;margin-bottom:2rem;">
+  Every Sunday — top AI news summarized by Claude with web search.
+</p>
+
+{% for post in paginator.posts %}
+<article style="border-bottom:1px solid #e5e7eb;padding-bottom:1.5rem;margin-bottom:1.5rem;">
+  <h2 style="margin-bottom:0.25rem;">
+    <a href="{{ post.url | prepend: site.baseurl }}" style="text-decoration:none;color:#111827;">
+      {{ post.title }}
+    </a>
+  </h2>
+  <p style="font-size:0.85rem;color:#9ca3af;margin:0 0 0.5rem;">
+    {{ post.date | date: "%B %d, %Y" }}
+  </p>
+  <p style="color:#374151;">{{ post.description }}</p>
+  <a href="{{ post.url | prepend: site.baseurl }}" style="font-size:0.9rem;color:#6366f1;">
+    Read digest →
+  </a>
+</article>
+{% endfor %}
+
+{% if paginator.total_pages > 1 %}
+<nav style="display:flex;gap:1rem;margin-top:2rem;">
+  {% if paginator.previous_page %}
+    <a href="{{ paginator.previous_page_path | prepend: site.baseurl }}">← Newer</a>
+  {% endif %}
+  {% if paginator.next_page %}
+    <a href="{{ paginator.next_page_path | prepend: site.baseurl }}">Older →</a>
+  {% endif %}
+</nav>
+{% endif %}

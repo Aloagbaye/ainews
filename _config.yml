@@ -1,0 +1,32 @@
+title: "AI News Digest"
+description: "Weekly AI headlines, summarized by Claude."
+url: "https://aloagbaye.github.io"                       
+baseurl: "/ainews"  
+
+theme: minima
+
+author:
+  name: "Israel Igietsemhe"
+
+permalink: /digest/:year/:month/:day/:title/
+
+paginate: 10
+paginate_path: "/page:num/"
+
+plugins:
+  - jekyll-paginate
+  - jekyll-feed
+  - jekyll-seo-tag
+
+# Exclude non-site files from the Jekyll build
+exclude:
+  - digest.py
+  - email_template.py
+  - publisher.py
+  - requirements.txt
+  - README.md
+  - "*.sh"
+  - .env.example
+  - .env
+  - Gemfile
+  - Gemfile.lock
