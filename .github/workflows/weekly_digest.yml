@@ -6,22 +6,33 @@ on:
     - cron: "0 7 * * 0"
   workflow_dispatch: # allow manual runs from GitHub UI
 
+# Allow the workflow to push commits and deploy to Pages
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
 jobs:
-  send-digest:
+  digest-and-publish:
     runs-on: ubuntu-latest
 
     steps:
+      # ── 1. Checkout ──────────────────────────────────────────────────────
       - name: Checkout repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4.2.2
+        with:
+          fetch-depth: 0
 
+      # ── 2. Python setup ──────────────────────────────────────────────────
       - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v5.6.0
         with:
           python-version: "3.11"
 
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      # ── 3. Run digest (fetch → email → write post) ────────────────────────
       - name: Run digest
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -30,3 +41,41 @@ jobs:
           TO_EMAILS:         ${{ secrets.TO_EMAILS }}
           TOPICS:            ${{ vars.TOPICS }}
         run: python digest.py
+
+      # ── 4. Commit new post back to main ───────────────────────────────────
+      - name: Commit new post
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add _posts/
+          git diff --cached --quiet || git commit -m "digest: add weekly post $(date +'%Y-%m-%d')"
+          git push
+
+      # ── 5. Ruby + Jekyll setup ────────────────────────────────────────────
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.2"
+          bundler-cache: true
+
+      - name: Build Jekyll site
+        run: bundle exec jekyll build --destination ./_site
+
+      # ── 6. Upload Pages artifact ──────────────────────────────────────────
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./_site
+
+  # ── Deploy job (separate, required by GitHub Pages) ──────────────────────
+  deploy:
+    needs: digest-and-publish
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
