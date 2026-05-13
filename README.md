@@ -1,6 +1,10 @@
-# Weekly AI News Digest
+# BinoculAI - Weekly AI News Digest
 
 Fetches the week's top AI headlines via **Claude** (with web search), summarizes them, and delivers a clean HTML email via **Resend** — automatically every Sunday.
+
+## Architecture
+
+![AI News Architecture](ai_news_architecture.png)
 
 ## Stack
 | Layer | Tool | Version |
