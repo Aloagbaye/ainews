@@ -5,8 +5,7 @@ baseurl: "/ainews"
 
 theme: minima
 
-author:
-  name: "Israel Igietsemhe"
+author: "Israel Igietsemhe"
 
 permalink: /digest/:year/:month/:day/:title/
 

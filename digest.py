@@ -10,6 +10,7 @@ import anthropic
 import resend
 from datetime import datetime
 from email_template import build_html_email
+from publisher import publish_post
 
 # ── Config ──────────────────────────────────────────────────────────────────
 ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
@@ -214,6 +215,10 @@ def main():
         print("📧  Sending email via Resend...")
         email_id = send_email(digest)
         print(f"✅  Sent! Email ID: {email_id}")
+
+        print("📝  Publishing to GitHub Pages...")
+        publish_post(digest)
+        print("✅  Post written. GitHub Actions will commit and deploy.")
     except Exception as e:
         print(f"❌  Failed to generate/send digest: {e}")
         raise
