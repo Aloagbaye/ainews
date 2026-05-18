@@ -17,16 +17,24 @@ def slugify(text: str) -> str:
     return text[:60].rstrip("-")
 
 
-def build_forecasting_post(news: dict, pubs: dict, social: dict, date: datetime) -> str:
+def build_forecasting_post(news: dict, pubs: dict, date: datetime) -> str:
     date_str = date.strftime("%B %d, %Y")
     iso_date = date.strftime("%Y-%m-%d")
     title    = f"Forecasting Digest — {date_str}"
 
-    # Stories
+    # Stories — include source badge and clickable links
     stories_md = ""
     for story in news.get("stories", []):
         source = f" *({story.get('source', '')})*" if story.get("source") else ""
-        stories_md += f"### {story['headline']}{source}\n\n{story['summary']}\n\n"
+        links = story.get("links") or []
+        if isinstance(links, str):
+            links = [links]
+        links_md = ""
+        if links:
+            parts = [f"[Source]({url})" for url in links if isinstance(url, str) and url.startswith("http")]
+            if parts:
+                links_md = f"\n\n{' · '.join(parts)}"
+        stories_md += f"### {story['headline']}{source}\n\n{story['summary']}{links_md}\n\n"
 
     # Papers
     papers_md = ""
@@ -37,17 +45,6 @@ def build_forecasting_post(news: dict, pubs: dict, social: dict, date: datetime)
             + (f" · `{paper.get('url_hint', '')}`" if paper.get("url_hint") else "")
             + f"\n\n{paper['summary']}\n\n"
         )
-
-    # Social drafts
-    li      = social.get("linkedin", {})
-    x_posts = social.get("x_posts", [])
-
-    li_md = f"> {li.get('post', '').replace(chr(10), chr(10) + '> ')}\n\n"
-
-    x_md = ""
-    for i, t in enumerate(x_posts, 1):
-        chars = len(t.get("text", ""))
-        x_md += f"**Post {i}** ({chars} chars)\n\n> {t.get('text', '')}\n\n"
 
     return f"""---
 layout: post
@@ -73,18 +70,6 @@ categories: [digest, forecasting]
 {papers_md}
 ---
 
-## Social drafts
-
-Use these as a starting point for your LinkedIn and X posts this week.
-
-### LinkedIn
-
-{li_md}
-### X (Twitter)
-
-{x_md}
----
-
 *Generated every Saturday by [Claude](https://anthropic.com) with web search.*
 """
 
@@ -99,7 +84,7 @@ def publish_forecasting_post(news: dict, pubs: dict, social: dict) -> Path:
 
     POSTS_DIR.mkdir(exist_ok=True)
     filename.write_text(
-        build_forecasting_post(news, pubs, social, now),
+        build_forecasting_post(news, pubs, now),
         encoding="utf-8"
     )
     print(f"📝  Forecasting post written → {filename}")

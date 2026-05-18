@@ -38,7 +38,9 @@ covering: {topics}.
 Focus on: vendor announcements, enterprise AI/ML forecasting tools, S&OP trends,
 real-world demand forecasting case studies, and industry analyst reports.
 
-Include 4-5 stories with plain-text headlines (no markdown bold). Prioritise practitioner relevance."""
+Include 4-5 stories with plain-text headlines (no markdown bold).
+For each story include the publication/site name and at least one direct source URL.
+Prioritise practitioner relevance over academic theory."""
 
 PUBLICATIONS_PROMPT = """You are a forecasting researcher helping a data scientist stay current
 with the academic literature.
@@ -82,8 +84,13 @@ NEWS_TOOL: dict = {
                         "headline": {"type": "string"},
                         "summary":  {"type": "string", "description": "2-3 sentence summary."},
                         "source":   {"type": "string", "description": "Publication or site name."},
+                        "links": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "At least one direct source URL per story.",
+                        },
                     },
-                    "required": ["headline", "summary", "source"],
+                    "required": ["headline", "summary", "source", "links"],
                 },
             },
             "watch": {"type": "string", "description": "One closing sentence on what to track."},
@@ -253,7 +260,12 @@ def _build_plain_text(news: dict, pubs: dict, social: dict) -> str:
     lines.append("INDUSTRY NEWS")
     lines.append("─" * 40)
     for i, s in enumerate(news.get("stories", []), 1):
-        lines += [f"{i}. {s['headline']} ({s.get('source', '')})", s["summary"], ""]
+        lines.append(f"{i}. {s['headline']} ({s.get('source', '')})")
+        lines.append(s["summary"])
+        story_links = [u for u in (s.get("links") or []) if isinstance(u, str) and u.startswith("http")]
+        if story_links:
+            lines.append(f"Source: {story_links[0]}")
+        lines.append("")
 
     lines += [f"What to watch: {news.get('watch', '')}", ""]
 

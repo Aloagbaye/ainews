@@ -14,6 +14,28 @@ def build_forecasting_email(news: dict, pubs: dict, social: dict, date_str: str)
             f'<span style="font-size:11px;color:#6b7280;margin-left:8px;">{source}</span>'
             if source else ""
         )
+
+        links = story.get("links") or []
+        if isinstance(links, str):
+            links = [links]
+        links_html = ""
+        if links:
+            link_items = ""
+            for url in links:
+                if not isinstance(url, str) or not url.startswith("http"):
+                    continue
+                link_items += (
+                    f'<a href="{url}" style="color:#2563eb;text-decoration:underline;"'
+                    ' target="_blank" rel="noopener noreferrer">Source</a>'
+                    '<span style="color:#cbd5e1;">&nbsp;·&nbsp;</span>'
+                )
+            link_items = link_items.removesuffix('<span style="color:#cbd5e1;">&nbsp;·&nbsp;</span>')
+            if link_items:
+                links_html = (
+                    f'<p style="margin:8px 0 0;font-size:12px;color:#64748b;">'
+                    f'{link_items}</p>'
+                )
+
         stories_html += f"""
         <tr><td style="padding:0 0 22px 0;">
           <p style="margin:0 0 4px;font-size:15px;font-weight:600;
@@ -23,6 +45,7 @@ def build_forecasting_email(news: dict, pubs: dict, social: dict, date_str: str)
           <p style="margin:0;font-size:14px;line-height:1.65;color:#374151;">
             {story['summary']}
           </p>
+          {links_html}
         </td></tr>"""
 
     # ── Papers ────────────────────────────────────────────────────────────────
