@@ -4,8 +4,6 @@ Fetches AI headlines via Claude web_search, summarizes them, and sends via Resen
 """
 
 import os
-import json
-import re
 import anthropic
 import resend
 from datetime import datetime
@@ -26,19 +24,47 @@ SYSTEM_PROMPT = """You are an expert AI industry analyst writing a concise weekl
 Search for the most important AI news from the past 7 days covering: {topics}.
 Write a newsletter-style digest with:
 - A punchy one-sentence intro
-- 4-5 top stories, each with a short bold headline and 2-3 sentence summary
+- 4-5 top stories, each with a plain-text headline and 2-3 sentence summary
 - For EACH story, include at least one verification link (prefer the original source / official announcement)
-- A closing "what to watch" sentence
+- A closing "what to watch" sentence"""
 
-Return ONLY valid JSON (no markdown fences) in this exact shape:
-{{
-  "intro": "...",
-  "stories": [
-    {{"headline": "...", "summary": "...", "links": ["https://..."]}},
-    ...
-  ],
-  "watch": "..."
-}}"""
+# Schema-bound tool used in phase 2 to force structured output.
+# Claude must populate this schema — the API validates it, eliminating all text JSON parsing.
+DIGEST_TOOL: dict = {
+    "name": "submit_digest",
+    "description": "Submit the final weekly AI news digest in structured format.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "intro": {
+                "type": "string",
+                "description": "Punchy one-sentence intro summarising the week in AI.",
+            },
+            "stories": {
+                "type": "array",
+                "description": "4-5 top stories from the past 7 days.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "headline": {"type": "string"},
+                        "summary": {"type": "string", "description": "2-3 sentence summary."},
+                        "links": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "At least one source URL per story.",
+                        },
+                    },
+                    "required": ["headline", "summary", "links"],
+                },
+            },
+            "watch": {
+                "type": "string",
+                "description": "Closing 'what to watch' sentence.",
+            },
+        },
+        "required": ["intro", "stories", "watch"],
+    },
+}
 
 def _is_http_url(value: str) -> bool:
     if not isinstance(value, str):
@@ -108,67 +134,63 @@ def normalize_digest(digest: dict) -> dict:
 
 
 def fetch_and_summarize() -> dict:
-    """Call Claude with web_search to get this week's AI news as structured JSON."""
-    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-    today  = datetime.today().strftime("%B %d, %Y")
+    """
+    Two-phase Claude call that guarantees structured output.
 
+    Phase 1 — web search: Claude searches freely and writes a prose digest.
+    Phase 2 — post-tool-use hook: Claude is forced to call `submit_digest`
+              (tool_choice="tool"), so the API validates and returns a typed
+              Python dict. No text JSON parsing is ever needed.
+    """
+    client   = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    today    = datetime.today().strftime("%B %d, %Y")
+    user_msg = (
+        f"Today is {today}. Search for and summarize the top AI news "
+        f"this week covering: {TOPICS}."
+    )
+
+    # ── Phase 1: let Claude search the web and write a free-form digest ──────
     try:
-        response = client.messages.create(
+        search_response = client.messages.create(
             model="claude-sonnet-4-20250514",
-            max_tokens=1500,
+            max_tokens=2000,
             tools=[{"type": "web_search_20250305", "name": "web_search"}],
             system=SYSTEM_PROMPT.format(topics=TOPICS),
-            messages=[{
-                "role": "user",
-                "content": (
-                    f"Today is {today}. Search for and summarize the top AI news "
-                    f"this week covering: {TOPICS}. Return the structured JSON digest now."
-                )
-            }]
+            messages=[{"role": "user", "content": user_msg}],
         )
     except anthropic.BadRequestError as e:
-        # Common cause: insufficient credits. Don't continue into JSON parsing.
         raise RuntimeError(f"Anthropic API request rejected: {e}") from e
     except anthropic.APIError as e:
         raise RuntimeError(f"Anthropic API error: {e}") from e
 
-    # Extract the last text block (Claude's final answer after tool calls)
-    text_blocks = [b.text for b in response.content if b.type == "text"]
+    text_blocks = [b.text for b in search_response.content if b.type == "text"]
     if not text_blocks:
-        raise ValueError("No text response returned from Claude.")
+        raise ValueError("No text response from Claude after web search.")
+    gathered = text_blocks[-1].strip()
+    if not gathered:
+        raise ValueError("Claude returned an empty response after web search.")
 
-    raw = text_blocks[-1].strip()
-    if not raw:
-        raise ValueError("Claude returned an empty final answer (expected JSON).")
-
-    # Strip <cite ...>...</cite> tags Claude may inject inside JSON string values.
-    raw = re.sub(r"<cite[^>]*>", "", raw)
-    raw = raw.replace("</cite>", "")
-
-    # Strip accidental markdown fences
-    if raw.startswith("```"):
-        parts = raw.split("```")
-        raw = parts[1] if len(parts) > 1 else raw
-        raw = raw.lstrip()
-        if raw.lower().startswith("json"):
-            raw = raw[4:].lstrip()
-
-    # If the model wrapped JSON in extra text, try to recover the JSON object.
-    candidate = raw.strip()
-    if not (candidate.startswith("{") and candidate.endswith("}")):
-        m = re.search(r"\{[\s\S]*\}", candidate)
-        if m:
-            candidate = m.group(0).strip()
-
+    # ── Phase 2: post-tool-use hook — force structured output via schema ──────
     try:
-        digest = json.loads(candidate)
-        return normalize_digest(digest)
-    except json.JSONDecodeError as e:
-        snippet = candidate[:500].replace("\n", "\\n")
-        raise ValueError(
-            "Claude output was not valid JSON. "
-            f"First 500 chars: {snippet}"
-        ) from e
+        struct_response = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=2000,
+            tools=[DIGEST_TOOL],
+            tool_choice={"type": "tool", "name": "submit_digest"},
+            messages=[
+                {"role": "user",      "content": user_msg},
+                {"role": "assistant", "content": gathered},
+                {"role": "user",      "content": "Now call submit_digest with the structured data."},
+            ],
+        )
+    except anthropic.APIError as e:
+        raise RuntimeError(f"Anthropic API error during structured output: {e}") from e
+
+    tool_blocks = [b for b in struct_response.content if b.type == "tool_use"]
+    if not tool_blocks:
+        raise ValueError("Claude did not call the submit_digest tool.")
+
+    return normalize_digest(tool_blocks[0].input)
 
 
 def send_email(digest: dict) -> str:
