@@ -1,19 +1,19 @@
 """
 Weekly Forecasting Digest
 Fetches business/supply chain forecasting news + recent academic publications
-via Claude web_search, sends an email via Resend, publishes a Jekyll post,
-and generates draft LinkedIn + X (Twitter) posts for the week.
+via web search (Claude, falling back to GPT), sends an email via Resend,
+publishes a Jekyll post, and generates draft LinkedIn + X (Twitter) posts
+for the week.
 """
 
 import os
-import anthropic
 import resend
 from datetime import datetime
+from ai_client import call_llm_with_search
 from forecasting_email_template import build_forecasting_email
 from forecasting_publisher import publish_forecasting_post
 
 # ── Config ───────────────────────────────────────────────────────────────────
-ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
 RESEND_API_KEY    = os.environ["RESEND_API_KEY"]
 FROM_EMAIL        = os.environ["FROM_EMAIL"]
 TO_EMAILS         = os.environ["TO_EMAILS_FORECASTING"].split(",")
@@ -152,71 +152,37 @@ SOCIAL_TOOL: dict = {
 }
 
 
-def _call_claude(system: str, user: str, output_tool: dict) -> dict:
+def _call_llm(system: str, user: str, output_tool: dict) -> tuple:
     """
-    Two-phase Claude call that guarantees structured output.
-
-    Phase 1 — web search: Claude searches freely and writes a prose response.
-    Phase 2 — post-tool-use hook: Claude is forced to call `output_tool`
-              (tool_choice="tool"), so the API validates and returns a typed
-              Python dict. No text JSON parsing is ever needed.
+    Two-phase "search then extract structured output" call, tried first
+    against Claude and automatically falling back to GPT if Claude errors
+    out. Returns (structured_output, provider_label).
     """
-    client   = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
     today    = datetime.today().strftime("%B %d, %Y")
     user_msg = f"Today is {today}. {user}"
 
-    # ── Phase 1: let Claude search and produce a free-form response ───────────
-    search_response = client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=2000,
-        tools=[{"type": "web_search_20250305", "name": "web_search"}],
-        system=system,
-        messages=[{"role": "user", "content": user_msg}],
-    )
-
-    text_blocks = [b.text for b in search_response.content if b.type == "text"]
-    if not text_blocks:
-        raise ValueError("No text response from Claude after web search.")
-    gathered = text_blocks[-1].strip()
-
-    # ── Phase 2: post-tool-use hook — force structured output via schema ──────
-    struct_response = client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=2000,
-        tools=[output_tool],
-        tool_choice={"type": "tool", "name": output_tool["name"]},
-        messages=[
-            {"role": "user",      "content": user_msg},
-            {"role": "assistant", "content": gathered},
-            {"role": "user",      "content": f"Now call {output_tool['name']} with the structured data."},
-        ],
-    )
-
-    tool_blocks = [b for b in struct_response.content if b.type == "tool_use"]
-    if not tool_blocks:
-        raise ValueError(f"Claude did not call the {output_tool['name']} tool.")
-    return tool_blocks[0].input
+    return call_llm_with_search(system=system, user_msg=user_msg, output_tool=output_tool)
 
 
-def fetch_news() -> dict:
+def fetch_news() -> tuple:
     print("  → Fetching industry news...")
-    return _call_claude(
+    return _call_llm(
         system=NEWS_PROMPT.format(topics=TOPICS),
         user="Search for this week's top supply chain and business forecasting news.",
         output_tool=NEWS_TOOL,
     )
 
 
-def fetch_publications() -> dict:
+def fetch_publications() -> tuple:
     print("  → Fetching recent publications...")
-    return _call_claude(
+    return _call_llm(
         system=PUBLICATIONS_PROMPT.format(journals=JOURNALS),
         user="Search for forecasting papers published in the past 14 days.",
         output_tool=PUBLICATIONS_TOOL,
     )
 
 
-def generate_social_posts(news: dict, pubs: dict) -> dict:
+def generate_social_posts(news: dict, pubs: dict) -> tuple:
     print("  → Drafting LinkedIn + X posts...")
     stories_text = "\n".join(
         f"- {s['headline']}: {s['summary']}" for s in news.get("stories", [])
@@ -225,7 +191,7 @@ def generate_social_posts(news: dict, pubs: dict) -> dict:
         f"- {p['title']} ({p['venue']}): {p['summary']}"
         for p in pubs.get("papers", [])
     )
-    return _call_claude(
+    return _call_llm(
         system=SOCIAL_PROMPT.format(
             intro=news.get("intro", ""),
             stories=stories_text,
@@ -293,19 +259,25 @@ def _build_plain_text(news: dict, pubs: dict, social: dict) -> str:
 def main():
     print("⏳  Building this week's forecasting digest...")
 
-    news  = fetch_news()
-    pubs  = fetch_publications()
-    social = generate_social_posts(news, pubs)
+    news,   news_provider   = fetch_news()
+    pubs,   pubs_provider   = fetch_publications()
+    social, social_provider = generate_social_posts(news, pubs)
+
+    # Distinct providers actually used this run, in call order (dict preserves
+    # insertion order and de-dupes), so the post footer stays accurate even if
+    # one call fell back to GPT while the others stayed on Claude.
+    providers = list(dict.fromkeys([news_provider, pubs_provider, social_provider]))
 
     print(f"✅  {len(news.get('stories', []))} news stories, "
-          f"{len(pubs.get('papers', []))} papers, social drafts ready.")
+          f"{len(pubs.get('papers', []))} papers, social drafts ready "
+          f"(via {', '.join(providers)}).")
 
     print("📧  Sending email via Resend...")
     email_id = send_email(news, pubs, social)
     print(f"✅  Sent! Email ID: {email_id}")
 
     print("📝  Publishing to GitHub Pages...")
-    publish_forecasting_post(news, pubs, social)
+    publish_forecasting_post(news, pubs, social, providers)
     print("✅  Post written. GitHub Actions will commit and deploy.")
 
 

@@ -1,17 +1,17 @@
 """
 Weekly AI News Digest
-Fetches AI headlines via Claude web_search, summarizes them, and sends via Resend.
+Fetches AI headlines via web search (Claude, falling back to GPT), summarizes
+them, and sends via Resend.
 """
 
 import os
-import anthropic
 import resend
 from datetime import datetime
+from ai_client import call_llm_with_search
 from email_template import build_html_email
 from publisher import publish_post
 
 # ── Config ──────────────────────────────────────────────────────────────────
-ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
 RESEND_API_KEY    = os.environ["RESEND_API_KEY"]
 FROM_EMAIL        = os.environ["FROM_EMAIL"]          # e.g. digest@yourdomain.com
 TO_EMAILS         = os.environ["TO_EMAILS"].split(",") # comma-separated list
@@ -135,62 +135,25 @@ def normalize_digest(digest: dict) -> dict:
 
 def fetch_and_summarize() -> dict:
     """
-    Two-phase Claude call that guarantees structured output.
-
-    Phase 1 — web search: Claude searches freely and writes a prose digest.
-    Phase 2 — post-tool-use hook: Claude is forced to call `submit_digest`
-              (tool_choice="tool"), so the API validates and returns a typed
-              Python dict. No text JSON parsing is ever needed.
+    Two-phase "search then extract structured output" call, tried first
+    against Claude and automatically falling back to GPT if Claude errors
+    out (e.g. a sunset model, outage, or rate limit).
     """
-    client   = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
     today    = datetime.today().strftime("%B %d, %Y")
     user_msg = (
         f"Today is {today}. Search for and summarize the top AI news "
         f"this week covering: {TOPICS}."
     )
 
-    # ── Phase 1: let Claude search the web and write a free-form digest ──────
-    try:
-        search_response = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=2000,
-            tools=[{"type": "web_search_20250305", "name": "web_search"}],
-            system=SYSTEM_PROMPT.format(topics=TOPICS),
-            messages=[{"role": "user", "content": user_msg}],
-        )
-    except anthropic.BadRequestError as e:
-        raise RuntimeError(f"Anthropic API request rejected: {e}") from e
-    except anthropic.APIError as e:
-        raise RuntimeError(f"Anthropic API error: {e}") from e
+    raw_digest, provider = call_llm_with_search(
+        system=SYSTEM_PROMPT.format(topics=TOPICS),
+        user_msg=user_msg,
+        output_tool=DIGEST_TOOL,
+    )
 
-    text_blocks = [b.text for b in search_response.content if b.type == "text"]
-    if not text_blocks:
-        raise ValueError("No text response from Claude after web search.")
-    gathered = text_blocks[-1].strip()
-    if not gathered:
-        raise ValueError("Claude returned an empty response after web search.")
-
-    # ── Phase 2: post-tool-use hook — force structured output via schema ──────
-    try:
-        struct_response = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=2000,
-            tools=[DIGEST_TOOL],
-            tool_choice={"type": "tool", "name": "submit_digest"},
-            messages=[
-                {"role": "user",      "content": user_msg},
-                {"role": "assistant", "content": gathered},
-                {"role": "user",      "content": "Now call submit_digest with the structured data."},
-            ],
-        )
-    except anthropic.APIError as e:
-        raise RuntimeError(f"Anthropic API error during structured output: {e}") from e
-
-    tool_blocks = [b for b in struct_response.content if b.type == "tool_use"]
-    if not tool_blocks:
-        raise ValueError("Claude did not call the submit_digest tool.")
-
-    return normalize_digest(tool_blocks[0].input)
+    digest = normalize_digest(raw_digest)
+    digest["provider"] = provider
+    return digest
 
 
 def send_email(digest: dict) -> str:
@@ -230,9 +193,9 @@ def build_plain_text(digest: dict) -> str:
 
 def main():
     try:
-        print("⏳  Fetching this week's AI news via Claude...")
+        print("⏳  Fetching this week's AI news...")
         digest = fetch_and_summarize()
-        print(f"✅  Got {len(digest['stories'])} stories.")
+        print(f"✅  Got {len(digest['stories'])} stories via {digest['provider']}.")
 
         print("📧  Sending email via Resend...")
         email_id = send_email(digest)

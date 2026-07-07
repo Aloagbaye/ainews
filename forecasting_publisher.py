@@ -10,6 +10,16 @@ from pathlib import Path
 POSTS_DIR = Path("_posts")
 
 
+def _provider_credit(providers) -> str:
+    """Render a footer credit line linking to whichever provider(s) generated the digest."""
+    providers = providers or ["Claude"]
+    links = []
+    for provider in providers:
+        url = "https://openai.com" if provider.lower().startswith("openai") else "https://anthropic.com"
+        links.append(f"[{provider}]({url})")
+    return " and ".join(links)
+
+
 def slugify(text: str) -> str:
     text = text.lower().strip()
     text = re.sub(r"[^\w\s-]", "", text)
@@ -17,7 +27,7 @@ def slugify(text: str) -> str:
     return text[:60].rstrip("-")
 
 
-def build_forecasting_post(news: dict, pubs: dict, date: datetime) -> str:
+def build_forecasting_post(news: dict, pubs: dict, date: datetime, providers=None) -> str:
     date_str = date.strftime("%B %d, %Y")
     iso_date = date.strftime("%Y-%m-%d")
     title    = f"Forecasting Digest — {date_str}"
@@ -70,11 +80,11 @@ categories: [digest, forecasting]
 {papers_md}
 ---
 
-*Generated every Saturday by [Claude](https://anthropic.com) with web search.*
+*Generated every Saturday by {_provider_credit(providers)} with web search.*
 """
 
 
-def publish_forecasting_post(news: dict, pubs: dict, social: dict) -> Path:
+def publish_forecasting_post(news: dict, pubs: dict, social: dict, providers=None) -> Path:
     now      = datetime.today()
     iso_date = now.strftime("%Y-%m-%d")
 
@@ -84,7 +94,7 @@ def publish_forecasting_post(news: dict, pubs: dict, social: dict) -> Path:
 
     POSTS_DIR.mkdir(exist_ok=True)
     filename.write_text(
-        build_forecasting_post(news, pubs, now),
+        build_forecasting_post(news, pubs, now, providers),
         encoding="utf-8"
     )
     print(f"📝  Forecasting post written → {filename}")

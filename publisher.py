@@ -13,6 +13,14 @@ from pathlib import Path
 POSTS_DIR = Path("_posts")
 
 
+def _provider_credit(provider: str) -> str:
+    """Render a footer credit line linking to whichever provider actually generated the digest."""
+    provider = provider or "Claude"
+    if provider.lower().startswith("openai"):
+        return f"[{provider}](https://openai.com)"
+    return f"[{provider}](https://anthropic.com)"
+
+
 def slugify(text: str) -> str:
     """Convert a headline to a URL-safe slug."""
     text = text.lower().strip()
@@ -51,7 +59,7 @@ categories: [digest, ai-news]
 
 ---
 
-*Generated every Sunday by [Claude](https://anthropic.com) with web search.*
+*Generated every Sunday by {_provider_credit(digest.get("provider"))} with web search.*
 """
 
 
