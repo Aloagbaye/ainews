@@ -51,7 +51,10 @@ Search for forecasting-related papers and publications from the past 14 days in:
 Focus on: probabilistic forecasting, neural forecasting, LLMs for time series,
 supply chain optimisation, demand forecasting methods, and ensemble approaches.
 
-Include 3-5 papers. Prioritise papers with practical forecasting relevance."""
+Include 3-5 papers. For EACH paper, provide a proper citation (authors and venue),
+its arXiv ID or DOI, and at least one direct working URL (arXiv abstract page,
+publisher page, or DOI link) so the reader can verify and open the source.
+Prioritise papers with practical forecasting relevance."""
 
 SOCIAL_PROMPT = """You are a social media strategist helping a Lead Data Scientist share
 forecasting insights professionally.
@@ -66,8 +69,8 @@ and three X posts (max 280 chars each: one punchy insight, one paper highlight, 
 LinkedIn tone: thoughtful practitioner. X tone: direct, opinionated, technically credible."""
 
 # ── Output tool schemas ────────────────────────────────────────────────────────
-# Each tool is used in phase 2 of _call_claude to force structured output.
-# Claude must populate the schema — the API validates it, eliminating text JSON parsing.
+# Each tool is used in phase 2 of _call_llm to force structured output.
+# The model must populate the schema — the API validates it, eliminating text JSON parsing.
 
 NEWS_TOOL: dict = {
     "name": "submit_news",
@@ -110,13 +113,24 @@ PUBLICATIONS_TOOL: dict = {
                 "items": {
                     "type": "object",
                     "properties": {
-                        "title":    {"type": "string"},
-                        "authors":  {"type": "string"},
-                        "venue":    {"type": "string"},
-                        "summary":  {"type": "string", "description": "2-3 sentences on contribution and practitioner relevance."},
-                        "url_hint": {"type": "string", "description": "arXiv ID, DOI hint, or enough info to find the paper."},
+                        "title":      {"type": "string"},
+                        "authors":    {"type": "string"},
+                        "venue":      {"type": "string"},
+                        "identifier": {
+                            "type": "string",
+                            "description": "arXiv ID (e.g. arXiv:2401.01234) or DOI, for proper citation.",
+                        },
+                        "summary":    {"type": "string", "description": "2-3 sentences on contribution and practitioner relevance."},
+                        "links": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": (
+                                "At least one direct working URL to the paper "
+                                "(arXiv abstract page, publisher page, or DOI link)."
+                            ),
+                        },
                     },
-                    "required": ["title", "authors", "venue", "summary", "url_hint"],
+                    "required": ["title", "authors", "venue", "identifier", "summary", "links"],
                 },
             },
         },
@@ -152,6 +166,66 @@ SOCIAL_TOOL: dict = {
 }
 
 
+def _is_http_url(value) -> bool:
+    return isinstance(value, str) and (value.startswith("http://") or value.startswith("https://"))
+
+
+def _fallback_paper_link(title: str) -> str:
+    # Google Scholar search is a decent "verify it yourself" fallback when the
+    # model doesn't return a canonical URL. Keeps every paper clickable.
+    from urllib.parse import quote_plus
+
+    q = quote_plus(title or "forecasting research")
+    return f"https://scholar.google.com/scholar?q={q}"
+
+
+def normalize_publications(pubs: dict) -> dict:
+    """
+    Ensure a stable publications shape and at least one working link per
+    paper. Guards against occasional model schema drift or missing URLs.
+    """
+    papers = pubs.get("papers") if isinstance(pubs, dict) else None
+    if not isinstance(papers, list):
+        papers = []
+
+    normalized_papers = []
+    for paper in papers:
+        if not isinstance(paper, dict):
+            continue
+
+        title = (paper.get("title") or "").strip()
+
+        links_raw = paper.get("links", [])
+        if isinstance(links_raw, str):
+            links_raw = [links_raw]
+        if not isinstance(links_raw, list):
+            links_raw = []
+
+        links = []
+        for link in links_raw:
+            if isinstance(link, dict):
+                link = link.get("url")
+            if _is_http_url(link):
+                links.append(link)
+
+        if not links:
+            links = [_fallback_paper_link(title)]
+
+        normalized_papers.append(
+            {
+                "title":      title,
+                "authors":    (paper.get("authors") or "").strip(),
+                "venue":      (paper.get("venue") or "").strip(),
+                "identifier": (paper.get("identifier") or "").strip(),
+                "summary":    (paper.get("summary") or "").strip(),
+                "links":      links,
+            }
+        )
+
+    pubs["papers"] = normalized_papers
+    return pubs
+
+
 def _call_llm(system: str, user: str, output_tool: dict) -> tuple:
     """
     Two-phase "search then extract structured output" call, tried first
@@ -175,11 +249,12 @@ def fetch_news() -> tuple:
 
 def fetch_publications() -> tuple:
     print("  → Fetching recent publications...")
-    return _call_llm(
+    pubs, provider = _call_llm(
         system=PUBLICATIONS_PROMPT.format(journals=JOURNALS),
         user="Search for forecasting papers published in the past 14 days.",
         output_tool=PUBLICATIONS_TOOL,
     )
+    return normalize_publications(pubs), provider
 
 
 def generate_social_posts(news: dict, pubs: dict) -> tuple:
@@ -238,13 +313,14 @@ def _build_plain_text(news: dict, pubs: dict, social: dict) -> str:
     lines.append("RECENT PUBLICATIONS")
     lines.append("─" * 40)
     for p in pubs.get("papers", []):
-        lines += [
-            f"{p['title']}",
-            f"{p.get('authors', '')} · {p.get('venue', '')}",
-            p["summary"],
-            f"Find it: {p.get('url_hint', '')}",
-            ""
-        ]
+        citation = f"{p.get('authors', '')} · {p.get('venue', '')}"
+        if p.get("identifier"):
+            citation += f" · {p['identifier']}"
+        lines += [f"{p['title']}", citation, p["summary"]]
+        paper_links = [u for u in (p.get("links") or []) if isinstance(u, str) and u.startswith("http")]
+        if paper_links:
+            lines.append(f"Read it: {paper_links[0]}")
+        lines.append("")
 
     lines.append("SOCIAL DRAFTS")
     lines.append("─" * 40)

@@ -46,15 +46,29 @@ def build_forecasting_post(news: dict, pubs: dict, date: datetime, providers=Non
                 links_md = f"\n\n{' · '.join(parts)}"
         stories_md += f"### {story['headline']}{source}\n\n{story['summary']}{links_md}\n\n"
 
-    # Papers
+    # Papers — include full citation (authors, venue, arXiv ID/DOI) and clickable links
     papers_md = ""
     for paper in pubs.get("papers", []):
-        papers_md += (
-            f"#### {paper['title']}\n\n"
-            f"**{paper.get('authors', '')}** · *{paper.get('venue', '')}*"
-            + (f" · `{paper.get('url_hint', '')}`" if paper.get("url_hint") else "")
-            + f"\n\n{paper['summary']}\n\n"
-        )
+        citation_bits = []
+        if paper.get("authors"):
+            citation_bits.append(f"**{paper['authors']}**")
+        if paper.get("venue"):
+            citation_bits.append(f"*{paper['venue']}*")
+        if paper.get("identifier"):
+            citation_bits.append(f"`{paper['identifier']}`")
+        citation_line = " · ".join(citation_bits)
+
+        paper_links = paper.get("links") or []
+        if isinstance(paper_links, str):
+            paper_links = [paper_links]
+        link_parts = [
+            f"[Read paper]({url})" if i == 0 else f"[Link {i + 1}]({url})"
+            for i, url in enumerate(paper_links)
+            if isinstance(url, str) and url.startswith("http")
+        ]
+        links_md = f"\n\n{' · '.join(link_parts)}" if link_parts else ""
+
+        papers_md += f"#### {paper['title']}\n\n{citation_line}\n\n{paper['summary']}{links_md}\n\n"
 
     return f"""---
 layout: post

@@ -51,19 +51,46 @@ def build_forecasting_email(news: dict, pubs: dict, social: dict, date_str: str)
     # ── Papers ────────────────────────────────────────────────────────────────
     papers_html = ""
     for paper in pubs.get("papers", []):
+        meta_bits = []
+        if paper.get("authors"):
+            meta_bits.append(paper["authors"])
+        if paper.get("venue"):
+            meta_bits.append(f"<em>{paper['venue']}</em>")
+        if paper.get("identifier"):
+            meta_bits.append(paper["identifier"])
+        meta_html = "&nbsp;·&nbsp;".join(meta_bits)
+
+        paper_links = paper.get("links") or []
+        if isinstance(paper_links, str):
+            paper_links = [paper_links]
+        link_items = ""
+        for i, url in enumerate(paper_links):
+            if not isinstance(url, str) or not url.startswith("http"):
+                continue
+            label = "Read paper" if i == 0 else f"Link {i + 1}"
+            link_items += (
+                f'<a href="{url}" style="color:#7c3aed;text-decoration:underline;"'
+                f' target="_blank" rel="noopener noreferrer">{label}</a>'
+                '<span style="color:#cbd5e1;">&nbsp;·&nbsp;</span>'
+            )
+        link_items = link_items.removesuffix('<span style="color:#cbd5e1;">&nbsp;·&nbsp;</span>')
+        paper_links_html = (
+            f'<p style="margin:8px 0 0;font-size:12px;color:#64748b;">{link_items}</p>'
+            if link_items else ""
+        )
+
         papers_html += f"""
         <tr><td style="padding:0 0 20px 0;">
           <p style="margin:0 0 2px;font-size:14px;font-weight:600;color:#1e293b;">
             {paper['title']}
           </p>
           <p style="margin:0 0 6px;font-size:12px;color:#6b7280;">
-            {paper.get('authors','')}&nbsp;·&nbsp;
-            <em>{paper.get('venue','')}</em>&nbsp;·&nbsp;
-            {paper.get('url_hint','')}
+            {meta_html}
           </p>
           <p style="margin:0;font-size:13px;line-height:1.6;color:#374151;">
             {paper['summary']}
           </p>
+          {paper_links_html}
         </td></tr>"""
 
     # ── Social drafts ─────────────────────────────────────────────────────────
