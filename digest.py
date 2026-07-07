@@ -8,6 +8,7 @@ import os
 import resend
 from datetime import datetime
 from ai_client import call_llm_with_search
+from categories import CATEGORY_LABELS, DEFAULT_CATEGORY, category_label
 from email_template import build_html_email
 from publisher import publish_post
 
@@ -17,14 +18,30 @@ FROM_EMAIL        = os.environ["FROM_EMAIL"]          # e.g. digest@yourdomain.c
 TO_EMAILS         = os.environ["TO_EMAILS"].split(",") # comma-separated list
 TOPICS            = os.environ.get(
     "TOPICS",
-    "LLMs, AI agents, ML research, AI policy, open-source AI"
+    "LLMs, AI agents, ML research, AI policy, open-source AI, "
+    "model training and inference methodologies, inference/training cost optimization, "
+    "AI systems and infrastructure design, GPU and accelerator hardware optimization"
 )
 
 SYSTEM_PROMPT = """You are an expert AI industry analyst writing a concise weekly digest.
-Search for the most important AI news from the past 7 days covering: {topics}.
+Search for the most important AI developments from the past 7 days covering: {topics}.
+
+Do NOT limit yourself to corporate/product news. Deliberately include a MIX across these
+categories, not just headline news:
+- news: product launches, funding, policy, corporate moves
+- research: new model architectures, training/fine-tuning techniques, algorithmic breakthroughs
+- cost_optimization: inference or training cost reductions, efficiency techniques (e.g. quantization,
+  distillation, caching, batching)
+- systems_design: AI infrastructure, serving architecture, orchestration, scaling patterns
+- gpu_hardware: GPU/accelerator optimization, new hardware, kernel-level performance work
+
+Aim for at least one story from the technical categories (research, cost_optimization,
+systems_design, gpu_hardware) alongside general news — this digest is for a technical audience
+that cares about how things are built, not just who raised money or shipped a product.
+
 Write a newsletter-style digest with:
 - A punchy one-sentence intro
-- 4-5 top stories, each with a plain-text headline and 2-3 sentence summary
+- 4-5 top stories, each with a plain-text headline, 2-3 sentence summary, and a category tag
 - For EACH story, include at least one verification link (prefer the original source / official announcement)
 - A closing "what to watch" sentence"""
 
@@ -42,19 +59,34 @@ DIGEST_TOOL: dict = {
             },
             "stories": {
                 "type": "array",
-                "description": "4-5 top stories from the past 7 days.",
+                "description": (
+                    "4-5 top stories from the past 7 days, covering a mix of general AI news "
+                    "and technical/engineering developments (methodology, cost optimization, "
+                    "systems design, GPU/hardware)."
+                ),
                 "items": {
                     "type": "object",
                     "properties": {
                         "headline": {"type": "string"},
                         "summary": {"type": "string", "description": "2-3 sentence summary."},
+                        "category": {
+                            "type": "string",
+                            "enum": list(CATEGORY_LABELS.keys()),
+                            "description": (
+                                "news = product launches, funding, policy, corporate moves. "
+                                "research = new model architectures / training techniques / algorithmic breakthroughs. "
+                                "cost_optimization = inference or training cost/efficiency improvements. "
+                                "systems_design = AI infrastructure, serving architecture, scaling patterns. "
+                                "gpu_hardware = GPU/accelerator optimization or new hardware."
+                            ),
+                        },
                         "links": {
                             "type": "array",
                             "items": {"type": "string"},
                             "description": "At least one source URL per story.",
                         },
                     },
-                    "required": ["headline", "summary", "links"],
+                    "required": ["headline", "summary", "category", "links"],
                 },
             },
             "watch": {
@@ -100,6 +132,10 @@ def normalize_digest(digest: dict) -> dict:
         headline = (story.get("headline") or "").strip()
         summary = (story.get("summary") or "").strip()
 
+        category = story.get("category")
+        if category not in CATEGORY_LABELS:
+            category = DEFAULT_CATEGORY
+
         links_raw = story.get("links", [])
         if isinstance(links_raw, str):
             links_raw = [links_raw]
@@ -121,6 +157,7 @@ def normalize_digest(digest: dict) -> dict:
             {
                 "headline": headline,
                 "summary": summary,
+                "category": category,
                 "links": links,
             }
         )
@@ -181,7 +218,7 @@ def build_plain_text(digest: dict) -> str:
     """Fallback plain-text version of the digest."""
     lines = [digest["intro"], ""]
     for i, story in enumerate(digest["stories"], 1):
-        lines.append(f"{i}. {story['headline']}")
+        lines.append(f"{i}. {story['headline']} [{category_label(story.get('category'))}]")
         lines.append(story["summary"])
         links = story.get("links") or []
         if isinstance(links, list) and links:

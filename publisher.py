@@ -9,6 +9,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 
+from categories import category_label
 
 POSTS_DIR = Path("_posts")
 
@@ -36,10 +37,16 @@ def build_markdown_post(digest: dict, date: datetime) -> str:
     title         = f"AI News Digest — {date_str}"
     first_headline = digest["stories"][0]["headline"] if digest["stories"] else ""
 
-    # Build story sections
+    # Build story sections — include category tag and source links
     stories_md = ""
     for story in digest["stories"]:
-        stories_md += f"### {story['headline']}\n\n{story['summary']}\n\n"
+        category = f" `{category_label(story.get('category'))}`"
+        links = story.get("links") or []
+        if isinstance(links, str):
+            links = [links]
+        parts = [f"[Source]({url})" for url in links if isinstance(url, str) and url.startswith("http")]
+        links_md = f"\n\n{' · '.join(parts)}" if parts else ""
+        stories_md += f"### {story['headline']}{category}\n\n{story['summary']}{links_md}\n\n"
 
     return f"""---
 layout: post

@@ -1,6 +1,8 @@
 # BinoculAI - Weekly AI News Digest
 
-Fetches the week's top AI headlines via **Claude** (with web search), summarizes them, and delivers a clean HTML email via **Resend** — automatically every Sunday.
+Fetches the week's top AI developments via **Claude** (with web search), summarizes them, and delivers a clean HTML email via **Resend** — automatically every Sunday.
+
+The digest deliberately looks beyond corporate/product headlines: each story is tagged with a category — `news`, `research` (new methodologies/architectures), `cost_optimization` (inference/training efficiency), `systems_design` (AI infrastructure/serving), or `gpu_hardware` (accelerator-level optimization) — and the prompt asks for a mix across all of them, not just news. Categories show up as a colored badge in the email and a tag in the published post. See `categories.py` for the category definitions.
 
 If the Claude call fails for any reason (a sunset/retired model, an outage, a rate limit, etc.), the digest automatically falls back to **OpenAI GPT** with its own web search tool, so a single provider hiccup never breaks the weekly run. See `ai_client.py` for the shared fallback logic used by both the AI news and forecasting digests.
 
@@ -59,7 +61,7 @@ TO_EMAILS        ← comma-separated: you@example.com,other@example.com
 
 Add this **repository variable** (optional):
 ```
-TOPICS           ← e.g. LLMs, AI agents, ML research
+TOPICS           ← e.g. LLMs, AI agents, ML research, GPU optimization, inference cost efficiency
 ```
 
 The workflow runs every Sunday at 7:00 AM UTC. You can also trigger it manually from the Actions tab.
@@ -69,6 +71,7 @@ The workflow runs every Sunday at 7:00 AM UTC. You can also trigger it manually 
 ai-news-digest/
 ├── digest.py           # Main script: fetch → summarize → send
 ├── ai_client.py         # Shared Claude → GPT fallback client (search + structured output)
+├── categories.py        # Story category labels/colors (news, research, cost, systems, GPU)
 ├── email_template.py   # HTML email builder
 ├── requirements.txt    # Pinned dependencies
 ├── .env.example        # Environment variable template
@@ -79,6 +82,7 @@ ai-news-digest/
 
 ## Customisation tips
 - **Topics**: Change the `TOPICS` env var to focus on any area (e.g. `AI in healthcare, robotics`)
+- **Categories**: Edit `categories.py` to add/rename story categories, and update the `category` enum + description in `digest.py`'s `DIGEST_TOOL` to match
 - **Frequency**: Edit the cron expression in `weekly_digest.yml` (e.g. `0 7 * * 1` for Monday)
 - **Multiple recipients**: Add comma-separated emails to `TO_EMAILS`
 - **Branding**: Edit `email_template.py` to match your colours and footer

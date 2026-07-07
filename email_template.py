@@ -3,10 +3,20 @@ HTML email template for the AI News Digest.
 Clean, email-client-safe inline CSS.
 """
 
+from categories import category_color, category_label
+
 
 def build_html_email(digest: dict, date_str: str) -> str:
     stories_html = ""
     for story in digest["stories"]:
+        color = category_color(story.get("category"))
+        badge_html = (
+            f'<span style="display:inline-block;margin-left:8px;padding:2px 8px;'
+            f'border-radius:10px;background:{color}1a;color:{color};'
+            f'font-size:10px;font-weight:700;letter-spacing:0.04em;'
+            f'text-transform:uppercase;vertical-align:middle;">'
+            f'{category_label(story.get("category"))}</span>'
+        )
         links_html = ""
         links = story.get("links") or []
         if isinstance(links, str):
@@ -37,7 +47,7 @@ def build_html_email(digest: dict, date_str: str) -> str:
           <td style="padding:0 0 24px 0;">
             <p style="margin:0 0 6px 0;font-size:16px;font-weight:600;
                        color:#111827;font-family:Georgia,serif;">
-              {story['headline']}
+              {story['headline']}{badge_html}
             </p>
             <p style="margin:0;font-size:15px;line-height:1.65;color:#374151;">
               {story['summary']}
